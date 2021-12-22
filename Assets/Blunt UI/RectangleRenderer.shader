@@ -80,12 +80,13 @@ Shader "Unlit/RectangleRenderer"
 
             fixed4 _Roundness;
             float _Padding;
-
             float _OutlineSize;
+            float _GraphicBlur;
             fixed4 _OutlineColor;
 
             float _ShadowSize;
             float _ShadowBlur;
+            float _ShadowPow;
             fixed4 _ShadowColor;
 
             float2 _Size;
@@ -125,29 +126,31 @@ Shader "Unlit/RectangleRenderer"
                 float2 position = (uv - 0.5) * _Size;
                 float2 halfSize = _Size * 0.5;
 
-                half4 color = (tex2D(_MainTex, uv) + _TextureSampleAdd) * IN.color;
-
-                // This will contain our end result
-                half4 effects = half4(0, 0, 0, 0);
+                half4 _GraphicColor = (tex2D(_MainTex, uv) + _TextureSampleAdd) * IN.color;
 
                 // Signed distance field calculation
                 float dist = sdRoundedBox(position, halfSize, _Roundness);
                 float delta = fwidth(dist);
 
                 // Calculate the different masks based on the SDF
-                float alpha = 1 - smoothstep(-delta, 0, dist);
+                float graphicAlpha = 1 - smoothstep(-delta, 0, dist);
                 float outlineAlpha = (1 - smoothstep(_OutlineSize - delta, _OutlineSize, dist));
-                float shadowAlpha = (1 - smoothstep(_ShadowSize - _ShadowBlur, _ShadowSize, dist));
+                float shadowAlpha = (1 - smoothstep(_ShadowSize - _ShadowBlur - delta, _ShadowSize, dist));
 
                 // Start with the background most layer, aka shadows
-                float4 shadowColor = _ShadowColor;
-                shadowColor.a *= shadowAlpha;
+                shadowAlpha *= pow(shadowAlpha, _ShadowPow) * _ShadowColor.a;
+                outlineAlpha *= _OutlineColor.a;
+                graphicAlpha *= _GraphicColor.a;
 
-                // super impose the outline
-                effects = lerp(shadowColor, _OutlineColor, outlineAlpha);
-
-                // super impose the image
-                effects = lerp(effects, color, color.a * alpha);
+                half4 effects = lerp(
+                    lerp(
+                        half4(_ShadowColor.rgb, shadowAlpha), 
+                        half4(_OutlineColor.rgb, outlineAlpha),
+                        outlineAlpha
+                    ), 
+                    half4(_GraphicColor.rgb, graphicAlpha),
+                    graphicAlpha
+                );
                 
                 // Unity stuff
                 #ifdef UNITY_UI_CLIP_RECT
@@ -157,7 +160,7 @@ Shader "Unlit/RectangleRenderer"
                 #ifdef UNITY_UI_ALPHACLIP
                 clip (effects.a - 0.001);
                 #endif
-
+                
                 return effects;
             }
             ENDCG
